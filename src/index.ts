@@ -1,8 +1,11 @@
 #!/usr/bin/env node
+import "./kb/install"; // KB: trava do workspace — tem de ser o primeiro import
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CONFIG } from "./shared/config";
+import { KB_WORKSPACE_ID } from "./kb/workspace-guard";
+import { registerKbToolsRead, registerKbToolsWrite } from "./kb/kb-tools";
 import {getCurrentUser, getSpaceSearchIndex} from "./shared/utils";
 
 // Import tool registration functions
@@ -20,6 +23,9 @@ let server: McpServer;
 
 // Register tools based on mode with user data for enhanced documentation
 async function initializeServer() {
+  if (CONFIG.teamId !== KB_WORKSPACE_ID) {
+    throw new Error(`CLICKUP_TEAM_ID ${CONFIG.teamId} recusado: esta instalação só atende o workspace da KB (${KB_WORKSPACE_ID}).`);
+  }
   console.error(`Starting ClickUp MCP in ${CONFIG.mode} mode`);
 
   // Fetch current user and spaces for enhanced tool documentation and API health check
@@ -112,6 +118,7 @@ Use the ClickUp search tools to find tasks assigned to me, and get detailed info
     registerListToolsRead(server);
     registerTimeToolsRead(server);
     registerDocumentToolsRead(server);
+    registerKbToolsRead(server);
   } else if (CONFIG.mode === 'write') {
     // All tools (full functionality)
     registerTaskToolsRead(server, userData);
@@ -125,6 +132,8 @@ Use the ClickUp search tools to find tasks assigned to me, and get detailed info
     registerTimeToolsWrite(server);
     registerDocumentToolsRead(server);
     registerDocumentToolsWrite(server);
+    registerKbToolsRead(server);
+    registerKbToolsWrite(server);
   }
 
 

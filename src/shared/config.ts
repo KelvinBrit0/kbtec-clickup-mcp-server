@@ -1,3 +1,5 @@
+import { loadApiKey } from "../kb/token";
+import { KB_WORKSPACE_ID } from "../kb/workspace-guard";
 export const rawPrimaryLang = process.env.CLICKUP_PRIMARY_LANGUAGE || process.env.LANG;
 let detectedLanguageHint: string | undefined = undefined;
 
@@ -95,8 +97,10 @@ function parseNumericEnv(
 }
 
 export const CONFIG = {
-  apiKey: process.env.CLICKUP_API_KEY!,
-  teamId: process.env.CLICKUP_TEAM_ID!,
+  apiKey: loadApiKey()!,
+  // KB: o workspace é o da KB por padrão; outro valor é recusado no início do servidor
+  // (src/index.ts) e, em qualquer caso, pela trava em src/kb/workspace-guard.ts.
+  teamId: process.env.CLICKUP_TEAM_ID || KB_WORKSPACE_ID,
   maxImages: process.env.MAX_IMAGES ? parseInt(process.env.MAX_IMAGES) : 4,
   maxResponseSizeMB: process.env.MAX_RESPONSE_SIZE_MB ? parseFloat(process.env.MAX_RESPONSE_SIZE_MB) : 1,
   // Upper bound for a single image uploaded to ClickUp. Unlike maxResponseSizeMB this is
