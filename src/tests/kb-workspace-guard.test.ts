@@ -251,3 +251,68 @@ test("falha de rede ao carregar espaços não trava as conferências seguintes",
   fail = false;
   assert.equal((await guarded(`${API}/space/sKB`, AUTH)).status, 200);
 });
+
+// --- Rotas novas de 19/10/2026: lista, pasta, checklist e modelo de tarefa ---
+
+test("criar lista: no espaço ou pasta da KB passa; em espaço ou pasta de fora é negado sem sair", async () => {
+  const api = fakeApi({
+    ...BASE_ROUTES,
+    "GET /folder/fkb": { id: "fkb", space: { id: "sKB" } },
+    "GET /folder/ffer": { id: "ffer", space: { id: "sFER" } },
+    "POST /space/sKB/list": { id: "novaLista" },
+    "POST /space/sFER/list": { id: "x" },
+    "POST /folder/fkb/list": { id: "novaLista2" },
+    "POST /folder/ffer/list": { id: "x" },
+  });
+  assert.equal((await api.fetch(`${API}/space/sKB/list`, post({ name: "Clientes" }))).status, 200);
+  assert.equal((await api.fetch(`${API}/folder/fkb/list`, post({ name: "Clientes" }))).status, 200);
+  await rejectsGuard(api.fetch(`${API}/space/sFER/list`, post({ name: "Clientes" })), /espaço sFER/);
+  await rejectsGuard(api.fetch(`${API}/folder/ffer/list`, post({ name: "Clientes" })), /pasta ffer/);
+  assert.ok(!api.calls.some((c) => c.startsWith("POST") && c.includes("fer")));
+});
+
+test("criar pasta: espaço de fora negado; subpasta com pai de fora negada", async () => {
+  const api = fakeApi({
+    ...BASE_ROUTES,
+    "GET /folder/ffer": { id: "ffer", space: { id: "sFER" } },
+    "POST /space/sKB/folder": { id: "novaPasta" },
+  });
+  assert.equal((await api.fetch(`${API}/space/sKB/folder`, post({ name: "Clientes" }))).status, 200);
+  await rejectsGuard(api.fetch(`${API}/space/sFER/folder`, post({ name: "x" })), /espaço sFER/);
+  await rejectsGuard(
+    api.fetch(`${API}/space/sKB/folder`, post({ name: "x", parent_folder_id: "ffer" })),
+    /pasta ffer \(citada\)/
+  );
+});
+
+test("checklist: item só em checklist criada ou lida numa tarefa da KB", async () => {
+  const api = fakeApi({
+    ...BASE_ROUTES,
+    "GET /task/kb1": { id: "kb1", team_id: KB_WORKSPACE_ID, checklists: [{ id: "chkLido" }] },
+    "POST /task/kb1/checklist": { checklist: { id: "chkNovo" } },
+    "POST /checklist/chkNovo/checklist_item": {},
+    "POST /checklist/chkLido/checklist_item": {},
+    "POST /checklist/chkAlheio/checklist_item": {},
+  });
+  await rejectsGuard(api.fetch(`${API}/checklist/chkNovo/checklist_item`, post({ name: "i" })), /checklist chkNovo/);
+  await api.fetch(`${API}/task/kb1/checklist`, post({ name: "Entrada" }));
+  assert.equal((await api.fetch(`${API}/checklist/chkNovo/checklist_item`, post({ name: "i" }))).status, 200);
+  assert.equal((await api.fetch(`${API}/checklist/chkLido/checklist_item`, post({ name: "i" }))).status, 200);
+  await rejectsGuard(api.fetch(`${API}/checklist/chkAlheio/checklist_item`, post({ name: "i" })), /checklist chkAlheio/);
+  await rejectsGuard(api.fetch(`${API}/task/fer1/checklist`, post({ name: "x" })), /fer1/);
+});
+
+test("modelo de tarefa: só modelo do workspace da KB, só em lista da KB", async () => {
+  const api = fakeApi({
+    ...BASE_ROUTES,
+    [`GET /team/${KB_WORKSPACE_ID}/taskTemplate?page=0`]: { templates: [{ id: "tplKB", name: "Entrada de cliente" }] },
+    [`GET /team/${KB_WORKSPACE_ID}/taskTemplate?page=1`]: { templates: [] },
+    "POST /list/lkb/taskTemplate/tplKB": { id: "nova" },
+    "POST /list/lkb/taskTemplate/tplFER": { id: "x" },
+    "POST /list/lfer/taskTemplate/tplKB": { id: "x" },
+  });
+  assert.equal((await api.fetch(`${API}/list/lkb/taskTemplate/tplKB`, post({ name: "David" }))).status, 200);
+  await rejectsGuard(api.fetch(`${API}/list/lkb/taskTemplate/tplFER`, post({ name: "x" })), /modelo de tarefa tplFER/);
+  await rejectsGuard(api.fetch(`${API}/list/lfer/taskTemplate/tplKB`, post({ name: "x" })), /lista lfer/);
+  assert.ok(!api.calls.some((c) => c.startsWith("POST") && (c.includes("tplFER") || c.includes("lfer"))));
+});

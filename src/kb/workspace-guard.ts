@@ -50,6 +50,10 @@ export function createGuardedFetch(baseFetch: FetchFn): FetchFn {
   // com frequência, e cada consulta gasta uma chamada da cota da API.
   const ownerCache = new Map<string, Promise<boolean>>();
   const knownComments = new Set<string>();
+  // Checklist e modelo de tarefa também não têm rota que diga o workspace: só passam os IDs
+  // que este processo viu sair de uma tarefa da KB ou da lista de modelos do workspace da KB.
+  const knownChecklists = new Set<string>();
+  let kbTemplates: Promise<Set<string>> | null = null;
   // A tarefa lida na conferência fica guardada: é dela que sai o tipo de cada campo
   // personalizado (um campo "tasks" cita outras tarefas no corpo).
   const taskData = new Map<string, any>();
@@ -90,6 +94,29 @@ export function createGuardedFetch(baseFetch: FetchFn): FetchFn {
     }
   }
 
+  async function loadKbTemplates(auth: string): Promise<Set<string>> {
+    const ids = new Set<string>();
+    for (let page = 0; page < 20; page++) {
+      const data = await getJson(`/team/${KB_WORKSPACE_ID}/taskTemplate?page=${page}`, auth);
+      const templates = data?.templates ?? [];
+      for (const t of templates) ids.add(String(t.id));
+      if (templates.length === 0) break;
+    }
+    return ids;
+  }
+
+  async function templateIsKb(templateId: string, auth: string): Promise<boolean> {
+    try {
+      if (!kbTemplates) kbTemplates = loadKbTemplates(auth);
+      if ((await kbTemplates).has(templateId)) return true;
+      kbTemplates = loadKbTemplates(auth); // modelo criado depois do cache
+      return (await kbTemplates).has(templateId);
+    } catch {
+      kbTemplates = null;
+      return false;
+    }
+  }
+
   function cached(key: string, check: () => Promise<boolean>): Promise<boolean> {
     let hit = ownerCache.get(key);
     if (!hit) {
@@ -108,7 +135,10 @@ export function createGuardedFetch(baseFetch: FetchFn): FetchFn {
     return cached(`task:${taskId}${query}`, async () => {
       const task = await getJson(`/task/${encodeURIComponent(taskId)}${query}`, auth);
       const ok = String(task?.team_id ?? "") === KB_WORKSPACE_ID;
-      if (ok) taskData.set(taskId, task);
+      if (ok) {
+        taskData.set(taskId, task);
+        for (const c of task?.checklists ?? []) if (c?.id != null) knownChecklists.add(String(c.id));
+      }
       return ok;
     });
   }
@@ -139,7 +169,7 @@ export function createGuardedFetch(baseFetch: FetchFn): FetchFn {
   async function assertReferences(seg: string[], url: URL, body: unknown, auth: string): Promise<void> {
     const refs: Record<string, "task" | "list" | "folder" | "space"> = {
       task_id: "task", tid: "task", depends_on: "task", dependency_of: "task", links_to: "task",
-      list_id: "list", folder_id: "folder", space_id: "space",
+      list_id: "list", folder_id: "folder", parent_folder_id: "folder", space_id: "space",
     };
     for (const [key, kind] of Object.entries(refs)) {
       for (const value of url.searchParams.getAll(key)) {
@@ -245,6 +275,9 @@ export function createGuardedFetch(baseFetch: FetchFn): FetchFn {
         if (!id) return deny(`rota /${resource} sem ID`);
         // /list/{id}/task/{tarefa} (tarefa em várias listas) cita uma segunda tarefa.
         if (sub === "task" && subId) await assertTask(subId, auth, "na lista");
+        if (sub === "taskTemplate" && !(subId && (await templateIsKb(subId, auth)))) {
+          return deny(`o modelo de tarefa ${subId ?? ""} não é do workspace da KB`);
+        }
         if (await containerIsKb(resource, id, auth)) return;
         return deny(`${resource === "list" ? "a lista" : "a pasta"} ${id} não é do workspace da KB`);
 
@@ -252,6 +285,10 @@ export function createGuardedFetch(baseFetch: FetchFn): FetchFn {
         if (!id) return deny("rota /space sem ID");
         if (await spaceIsKb(id, auth)) return;
         return deny(`o espaço ${id} não é do workspace da KB`);
+
+      case "checklist":
+        if (id && knownChecklists.has(id)) return;
+        return deny(`a checklist ${id ?? ""} não foi lida de uma tarefa da KB nesta sessão`);
 
       case "comment":
         // Comentário não tem rota de leitura própria que diga o workspace. Só passa o
@@ -269,6 +306,11 @@ export function createGuardedFetch(baseFetch: FetchFn): FetchFn {
     const seg = url.pathname.split("/").filter(Boolean);
     const isCommentList =
       (["task", "list"].includes(seg[2]) && seg[4] === "comment") || (seg[2] === "comment" && seg[4] === "reply");
+    // Checklist criada numa tarefa da KB (a tarefa já foi conferida para a chamada passar).
+    if (seg[2] === "task" && seg[4] === "checklist" && res.ok) {
+      const created = await res.clone().json().catch(() => null);
+      if (created?.checklist?.id != null) knownChecklists.add(String(created.checklist.id));
+    }
     if (!isCommentList || !res.ok) return;
     const body = await res.clone().json().catch(() => null);
     for (const c of body?.comments ?? []) if (c?.id != null) knownComments.add(String(c.id));

@@ -8,7 +8,9 @@ O que este fork acrescenta (tudo em `src/kb/`):
 - **Trava do workspace** (`workspace-guard.ts`): substitui o `fetch` global e só deixa passar chamada a
   objeto do workspace da KB (`90171602543`, escrito no código). Rota desconhecida é negada; o token
   nunca sai para outro host. Testes: `src/tests/kb-*.test.ts`.
-- **Ferramentas**: `startTimer`, `stopTimer`, `getRunningTimer`, `moveTask`, `deleteTask`.
+- **Ferramentas**: `startTimer`, `stopTimer`, `getRunningTimer`, `moveTask`, `deleteTask`, `createList`,
+  `createFolder`, `createChecklist`, `listTaskTemplates`, `createTaskFromTemplate`. Opção nova em campo de
+  lista suspensa não existe na API pública do ClickUp.
 - **Token por arquivo** (`token.ts`): `CLICKUP_API_KEY`, `CLICKUP_API_KEY_FILE` ou
   `~/.config/clickup/kb-bot-token` (token do robô que só enxerga a KB).
 
